@@ -55,6 +55,20 @@ def send_to_tmux(text):
         pass
     return False
 
+def send_to_xdo(text):
+    """Send text to the currently focused window using xdotool"""
+    try:
+        # Type the text to the currently focused window
+        subprocess.run(
+            ['xdotool', 'type', '--', text],
+            timeout=1
+        )
+        return True
+    except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
+        # xdotool not available or command failed
+        pass
+    return False
+
 def find_keyboard_devices():
     """Find all keyboard devices"""
     devices = []
@@ -72,7 +86,7 @@ def find_keyboard_devices():
     return devices
 
 class PushToTalkRecorder:
-    def __init__(self, hotkey='alt', model='tiny.en', device='cpu'):
+    def __init__(self, hotkey='alt', model='medium.en', device='cpu', output='xdo'):
         """
         Initialize push-to-talk recorder
 
@@ -80,8 +94,10 @@ class PushToTalkRecorder:
             hotkey: Key to hold for recording (default: alt)
             model: Whisper model to use for transcription
             device: Device to run model on ('cpu' or 'cuda')
+            output: Output method - 'xdo' or 'tmux' (default: xdo)
         """
         self.hotkey = hotkey.lower()
+        self.output_method = output
         self.recording = False
         self.audio_queue = queue.Queue()
         self.recording_thread = None
@@ -271,8 +287,11 @@ class PushToTalkRecorder:
                 # Print to stdout for logging
                 print(transcription, flush=True)
 
-                # Send to tmux
-                send_to_tmux(transcription + ' ')
+                # Send to appropriate output
+                if self.output_method == 'tmux':
+                    send_to_tmux(transcription + ' ')
+                else:  # xdo
+                    send_to_xdo(transcription + ' ')
 
         except Exception as e:
             print(f"\nError during transcription: {e}")
@@ -324,10 +343,11 @@ class PushToTalkRecorder:
 if __name__ == '__main__':
     import argparse
 
-    parser = argparse.ArgumentParser(description='Push-to-talk speech transcription for tmux')
+    parser = argparse.ArgumentParser(description='Push-to-talk speech transcription with XDO/tmux output')
     parser.add_argument('--hotkey', default='alt', help='Hotkey to hold for recording (default: alt)')
-    parser.add_argument('--model', default='tiny.en', help='Whisper model to use (default: tiny.en)')
+    parser.add_argument('--model', default='base.en', help='Whisper model to use (default: base.en)')
     parser.add_argument('--device', default='cpu', choices=['cpu', 'cuda'], help='Device to run on (default: cpu)')
+    parser.add_argument('--output', default='xdo', choices=['xdo', 'tmux'], help='Output method (default: xdo)')
 
     args = parser.parse_args()
 
@@ -347,7 +367,8 @@ if __name__ == '__main__':
     recorder = PushToTalkRecorder(
         hotkey=args.hotkey,
         model=args.model,
-        device=args.device
+        device=args.device,
+        output=args.output
     )
 
     recorder.run()
