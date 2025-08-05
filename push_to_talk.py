@@ -86,7 +86,7 @@ def find_keyboard_devices():
     return devices
 
 class PushToTalkRecorder:
-    def __init__(self, hotkey='alt', model='medium.en', device='cpu', output='xdo'):
+    def __init__(self, hotkey='alt', model='base.en', device='cpu', output='xdo'):
         """
         Initialize push-to-talk recorder
 
