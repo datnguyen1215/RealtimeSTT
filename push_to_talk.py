@@ -89,37 +89,89 @@ def send_to_tmux(text):
         pass
     return False
 
-def send_to_xdo(text):
-    """Send text to the currently focused window using custom XDO implementation"""
+def send_via_clipboard(text):
+    """Send text via clipboard and paste - more reliable than xdotool type"""
     try:
-        # Import custom XDO module
-        from custom_xdo import xdo_type
+        # First, set the clipboard using xclip
+        # Use echo and pipe to avoid encoding issues
+        clip_cmd = subprocess.Popen(
+            ['xclip', '-selection', 'clipboard'],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        clip_cmd.communicate(input=text.encode('utf-8'))
 
-        # Use custom XDO implementation with timeout
-        return xdo_type(text, timeout=Config.SUBPROCESS_TIMEOUT)
+        # Give clipboard time to update
+        time.sleep(0.1)
 
-    except ImportError:
-        # Fall back to subprocess xdotool if custom implementation not available
+        # Detect if we're in a terminal (simplified check)
+        is_terminal = False
         try:
-            subprocess.run(
-                ['xdotool', 'type', '--', text],
+            # Try to get window class name
+            result = subprocess.run(
+                ['xdotool', 'getactivewindow', 'getwindowclassname'],
+                capture_output=True,
+                text=True,
+                timeout=0.5
+            )
+            if result.returncode == 0:
+                window_class = result.stdout.strip().lower()
+                # Common terminal indicators
+                terminal_keywords = ['terminal', 'konsole', 'xterm', 'alacritty',
+                                   'kitty', 'urxvt', 'rxvt', 'tilix', 'terminator']
+                is_terminal = any(term in window_class for term in terminal_keywords)
+        except:
+            # If detection fails, we'll try both paste methods
+            pass
+
+        # Send paste command
+        if is_terminal:
+            # For terminals, use Ctrl+Shift+V
+            result = subprocess.run(
+                ['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+v'],
+                capture_output=True,
                 timeout=Config.SUBPROCESS_TIMEOUT
             )
-            return True
-        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
-            pass
-        return False
-    except Exception:
-        # Custom XDO failed, try subprocess fallback
-        try:
-            subprocess.run(
-                ['xdotool', 'type', '--', text],
+        else:
+            # For regular apps, use Ctrl+V
+            result = subprocess.run(
+                ['xdotool', 'key', '--clearmodifiers', 'ctrl+v'],
+                capture_output=True,
                 timeout=Config.SUBPROCESS_TIMEOUT
             )
+
+        # If the primary paste method succeeded, we're done
+        if result.returncode == 0:
             return True
-        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
-            pass
+
+        # If it failed and we haven't tried the other method, try it
+        if is_terminal:
+            # We tried terminal paste, now try regular
+            result = subprocess.run(
+                ['xdotool', 'key', '--clearmodifiers', 'ctrl+v'],
+                capture_output=True,
+                timeout=Config.SUBPROCESS_TIMEOUT
+            )
+        else:
+            # We tried regular paste, now try terminal
+            result = subprocess.run(
+                ['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+v'],
+                capture_output=True,
+                timeout=Config.SUBPROCESS_TIMEOUT
+            )
+
+        return result.returncode == 0
+
+    except Exception as e:
+        # Debug output
+        print(f"Debug: send_via_clipboard failed with exception: {e}", file=sys.stderr)
         return False
+
+def send_to_xdo(text):
+    """Send text to the currently focused window using clipboard method"""
+    # Use the reliable clipboard method only
+    return send_via_clipboard(text)
 
 def find_keyboard_devices():
     """Find all keyboard devices"""
