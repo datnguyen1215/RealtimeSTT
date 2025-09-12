@@ -91,8 +91,23 @@ def send_to_tmux(text):
 
 def send_via_clipboard(text):
     """Send text via clipboard and paste - more reliable than xdotool type"""
+    old_clipboard_content = None
     try:
-        # First, set the clipboard using xclip
+        # First, backup the current clipboard content
+        try:
+            result = subprocess.run(
+                ['xclip', '-selection', 'clipboard', '-o'],
+                capture_output=True,
+                timeout=0.5
+            )
+            if result.returncode == 0:
+                # Successfully backed up clipboard (only text content)
+                old_clipboard_content = result.stdout
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+            # Failed to backup, but continue anyway
+            pass
+
+        # Set the new clipboard content using xclip
         # Use echo and pipe to avoid encoding issues
         clip_cmd = subprocess.Popen(
             ['xclip', '-selection', 'clipboard'],
@@ -141,31 +156,62 @@ def send_via_clipboard(text):
                 timeout=Config.SUBPROCESS_TIMEOUT
             )
 
-        # If the primary paste method succeeded, we're done
-        if result.returncode == 0:
-            return True
+        # Store the result of first paste attempt
+        paste_successful = result.returncode == 0
 
         # If it failed and we haven't tried the other method, try it
-        if is_terminal:
-            # We tried terminal paste, now try regular
-            result = subprocess.run(
-                ['xdotool', 'key', '--clearmodifiers', 'ctrl+v'],
-                capture_output=True,
-                timeout=Config.SUBPROCESS_TIMEOUT
-            )
-        else:
-            # We tried regular paste, now try terminal
-            result = subprocess.run(
-                ['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+v'],
-                capture_output=True,
-                timeout=Config.SUBPROCESS_TIMEOUT
-            )
+        if not paste_successful:
+            if is_terminal:
+                # We tried terminal paste, now try regular
+                result = subprocess.run(
+                    ['xdotool', 'key', '--clearmodifiers', 'ctrl+v'],
+                    capture_output=True,
+                    timeout=Config.SUBPROCESS_TIMEOUT
+                )
+            else:
+                # We tried regular paste, now try terminal
+                result = subprocess.run(
+                    ['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+v'],
+                    capture_output=True,
+                    timeout=Config.SUBPROCESS_TIMEOUT
+                )
 
-        return result.returncode == 0
+            paste_successful = result.returncode == 0
+
+        # Restore the old clipboard content after paste (with small delay to ensure paste completes)
+        if paste_successful and old_clipboard_content is not None:
+            time.sleep(0.2)  # Ensure paste operation completes
+            try:
+                restore_cmd = subprocess.Popen(
+                    ['xclip', '-selection', 'clipboard'],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                restore_cmd.communicate(input=old_clipboard_content)
+            except:
+                # Failed to restore, but paste was successful
+                pass
+
+        return paste_successful
 
     except Exception as e:
         # Debug output
         print(f"Debug: send_via_clipboard failed with exception: {e}", file=sys.stderr)
+
+        # Try to restore clipboard on error
+        if old_clipboard_content is not None:
+            try:
+                restore_cmd = subprocess.Popen(
+                    ['xclip', '-selection', 'clipboard'],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                restore_cmd.communicate(input=old_clipboard_content)
+            except:
+                pass
+
         return False
 
 def send_to_xdo(text):
